@@ -2,31 +2,40 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:stock_watchlist/providers/stock_provider.dart';
 import 'package:stock_watchlist/providers/watchlist_provider.dart';
+import 'package:stock_watchlist/utils/app_colors.dart';
 import 'package:stock_watchlist/widgets/custom_snackbar.dart';
-import 'package:stock_watchlist/widgets/search_result_header.dart';
 import 'package:stock_watchlist/widgets/stock_card.dart';
 
-// Stock List View
 class StockListView extends StatelessWidget {
   final StockProvider stockProvider;
   final WatchlistProvider watchlistProvider;
+  final String title;
 
   const StockListView({
     super.key,
     required this.stockProvider,
     required this.watchlistProvider,
+    this.title = 'Search Results',
   });
 
   @override
   Widget build(BuildContext context) {
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Search results heading
-        const SearchResultHeader(),
+        // Section heading.
+        Text(
+          title,
+          style: const TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+            color: AppColors.primaryText,
+          ),
+        ),
 
         const SizedBox(height: 12),
 
-        // Stock search results
+        // Display the stocks.
         Expanded(
           child: ListView.builder(
             itemCount: stockProvider.stocks.length,
@@ -35,17 +44,11 @@ class StockListView extends StatelessWidget {
 
               return StockCard(
                 stock: stock,
-
-                // Latest stock price
                 price: stockProvider.getPrice(stock.symbol),
-
-                // Price request failed
                 hasPriceError: stockProvider.hasPriceError(stock.symbol),
-
-                // Check whether stock is saved
                 isAdded: watchlistProvider.isInWatchlist(stock.symbol),
 
-                // Add stock to watchlist
+                // Add the stock to the watchlist.
                 onAdd: () async {
                   await context.read<WatchlistProvider>().addStock(stock);
 

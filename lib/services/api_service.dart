@@ -1,16 +1,29 @@
+
 import 'dart:convert';
 import 'dart:isolate';
+
 import 'package:http/http.dart' as http;
 import 'package:stock_watchlist/models/stock_model.dart';
 
 class ApiService {
-  static const String _baseUrl = 'https://www.alphavantage.co/query';
+  static const String _baseUrl =
+      'https://www.alphavantage.co/query';
 
-  // Alpha Vantage API key
-  static const String _apiKey = 'RDQR5SN6J6CNAVJU';
+  // Read the API key from the run configuration.
+  static const String _apiKey =
+      String.fromEnvironment('ALPHA_VANTAGE_API_KEY');
 
-  // SEARCH STOCKS
+  // Check whether the API key is configured.
+  void _checkApiKey() {
+    if (_apiKey.isEmpty) {
+      throw Exception('API key is not configured');
+    }
+  }
+
+  // Search stocks by company name or symbol.
   Future<List<StockModel>> searchStocks(String keyword) async {
+    _checkApiKey();
+
     final Uri url = Uri.parse(_baseUrl).replace(
       queryParameters: {
         'function': 'SYMBOL_SEARCH',
@@ -22,33 +35,38 @@ class ApiService {
     final response = await http.get(url);
 
     if (response.statusCode == 200) {
-      final Map<String, dynamic> data = jsonDecode(response.body);
+      final Map<String, dynamic> data =
+          jsonDecode(response.body);
 
-      // Handle Alpha Vantage API limit
+      // Handle Alpha Vantage API errors.
       if (data.containsKey('Information')) {
         throw Exception('API request limit reached');
-      }
-
-      // Handle Alpha Vantage API error
-      if (data.containsKey('Error Message')) {
+      } else if (data.containsKey('Error Message')) {
         throw Exception('Stock data not found');
       }
 
-      // Parse search results in separate isolate
-      final List<dynamic> matches = await _parseJsonWithIsolate(response.body);
+      // Parse search results in a separate Isolate.
+      final List<dynamic> matches =
+          await _parseJsonWithIsolate(response.body);
 
       return matches
-          .map((item) => StockModel.fromJson(Map<String, dynamic>.from(item)))
+          .map(
+            (item) => StockModel.fromJson(
+              Map<String, dynamic>.from(item),
+            ),
+          )
           .toList();
+    } else {
+      // Handle other HTTP status codes.
+      _handleStatusCode(response.statusCode);
+      return [];
     }
-
-    _handleStatusCode(response.statusCode);
-
-    return [];
   }
 
-  // GET STOCK PRICE
+  // Get the latest stock price.
   Future<double> getStockPrice(String symbol) async {
+    _checkApiKey();
+
     final Uri url = Uri.parse(_baseUrl).replace(
       queryParameters: {
         'function': 'GLOBAL_QUOTE',
@@ -60,36 +78,41 @@ class ApiService {
     final response = await http.get(url);
 
     if (response.statusCode == 200) {
-      final Map<String, dynamic> data = jsonDecode(response.body);
+      final Map<String, dynamic> data =
+          jsonDecode(response.body);
 
-      // Handle Alpha Vantage API limit
+      // Handle Alpha Vantage API errors.
       if (data.containsKey('Information')) {
         throw Exception('API request limit reached');
-      }
-
-      // Handle Alpha Vantage API error
-      if (data.containsKey('Error Message')) {
+      } else if (data.containsKey('Error Message')) {
         throw Exception('Stock data not found');
       }
 
-      final Map<String, dynamic> quote = data['Global Quote'] ?? {};
+      final Map<String, dynamic> quote =
+          data['Global Quote'] ?? {};
 
-      // Make sure price data exists
+      // Check whether the price is available.
       if (quote.isEmpty || quote['05. price'] == null) {
         throw Exception('Stock price not available');
       }
 
-      final String price = quote['05. price'];
+      final String price = quote['05. price'].toString();
 
-      return double.tryParse(price) ?? 0.0;
+      final double? parsedPrice = double.tryParse(price);
+
+      if (parsedPrice == null) {
+        throw Exception('Invalid stock price');
+      }
+
+      return parsedPrice;
+    } else {
+      // Handle other HTTP status codes.
+      _handleStatusCode(response.statusCode);
+      return 0.0;
     }
-
-    _handleStatusCode(response.statusCode);
-
-    return 0.0;
   }
 
-  // HTTP STATUS ERROR HANDLING
+  // Handle HTTP errors.
   void _handleStatusCode(int statusCode) {
     if (statusCode == 400) {
       throw Exception('Bad request');
@@ -102,29 +125,37 @@ class ApiService {
     } else if (statusCode >= 500) {
       throw Exception('Server error');
     } else {
-      throw Exception('Request failed with status code $statusCode');
+      throw Exception(
+        'Request failed with status code $statusCode',
+      );
     }
   }
 
-  // ISOLATE
-  Future<List<dynamic>> _parseJsonWithIsolate(String responseBody) async {
+  // Parse search results in a separate Isolate.
+  Future<List<dynamic>> _parseJsonWithIsolate(
+    String responseBody,
+  ) async {
     final ReceivePort receivePort = ReceivePort();
 
-    await Isolate.spawn(_parseJson, [receivePort.sendPort, responseBody]);
+    await Isolate.spawn(
+      _parseJson,
+      [receivePort.sendPort, responseBody],
+    );
 
-    final List<dynamic> result = await receivePort.first;
-
-    receivePort.close();
-
-    return result;
+    try {
+      return await receivePort.first as List<dynamic>;
+    } finally {
+      receivePort.close();
+    }
   }
 
-  // Runs inside the new isolate
+  // Runs inside the new Isolate.
   static void _parseJson(List<dynamic> args) {
     final SendPort sendPort = args[0];
     final String responseBody = args[1];
 
-    final Map<String, dynamic> data = jsonDecode(responseBody);
+    final Map<String, dynamic> data =
+        jsonDecode(responseBody);
 
     final List<dynamic> matches = data['bestMatches'] ?? [];
 
